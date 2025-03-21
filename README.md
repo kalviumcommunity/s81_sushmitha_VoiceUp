@@ -1,4 +1,4 @@
-VOICEUP:- Amplify Your Voice for Change"*
+VOICEUP:- Amplify Your Voice for Change
 
 My capstone idea, "VoiceUp: Amplify Your Voice for Change," revolves around the voice of an individual and collective voice as an instrument of bringing change in society. It emphasizes that each voice is a singular instrument with the potential to make a deep impact. The overall premise is to give the masses the ability to use their voices for social and individual change, with the belief that an individual voice has the ability to create waves of impact, and collectively, voices have the ability to change society and create change. Throughout the history of mankind, revolutions have been sparked by people who elected to speak up, highlighting the historical significance of speaking up. Capstone concept puts your voice in a position to act as a transformatory power. VoiceUp, as a technology solution product, is trying to transform communication efficiency and increase collaboration and productivity in today's workplaces.
 
