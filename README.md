@@ -13,15 +13,25 @@ Day 1: Create a low-fidelity design for VoiceUp.
 
 Day 2: Create a high-fidelity design for VoiceUp.
 
-Day 3: Set up GitHub project and manage all daily tasks.
+Day 3: Set up GitHub project
 
-Day 4: Implement GET, PUT, and POST API assignments.
+Day 4: Managing all daily tasks
 
-Day 5: Deploy the backend server.
+Day 5: Implementing GET route
 
-Day 6: Implement database read and write operations.
+Day 6: Implementing PUT route  
+ 
+Day 7: POST API assignments
 
-Day 7: Initialize a React/frontend application.
+Day 8: Deploying the backend server
 
-Day 8: Deploy the frontend server and create a README file using markup language.
+Day 9: Database schema created
+
+Day 10: Implement database read and write operations.
+
+Day 11: Initialize a React/frontend application.
+
+Day 12: Deploy the frontend server
+
+Day 13: Create a README file using markup language.
 
