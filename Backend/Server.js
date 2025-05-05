@@ -18,7 +18,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Routes
 app.get('/', (req, res) => {
-  res.send('API is running...');
+  res.send('API is running successfully');
 });
 
 
