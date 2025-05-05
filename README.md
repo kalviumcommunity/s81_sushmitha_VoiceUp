@@ -9,7 +9,7 @@ It is also intended to track quantifiable change and foster direct communication
 
 ***DAILY PLANS:- ***
 
-Day 1: Create a low-fidelity design for VoiceUp.
+Day 1: Create a low-fidelity design for VoiceUp.bhhhh
 
 Day 2: Create a high-fidelity design for VoiceUp.
 
