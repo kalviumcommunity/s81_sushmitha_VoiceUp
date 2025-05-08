@@ -6,12 +6,15 @@ const authenticateToken = require('../db/middleware/authmiddleware');
 
 const authRouter = express.Router();
 
-// Generate JWT Token
+
 const generateToken = (userId) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET not set in environment variables.");
+  }
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '10d' });
 };
 
-// Signup Route
+
 authRouter.post('/signup', async (req, res) => {
   try {
     const { phoneNumber, password, role } = req.body;
@@ -30,17 +33,26 @@ authRouter.post('/signup', async (req, res) => {
     await newUser.save();
 
     const token = generateToken(newUser._id);
-    res.status(201).json({ message: "Signup successful", token, user: newUser });
+    res.status(201).json({
+      message: "Signup successful",
+      token,
+      user: { id: newUser._id, phoneNumber: newUser.phoneNumber, role: newUser.role }
+    });
 
   } catch (e) {
+    console.error("Signup error:", e);
     res.status(500).json({ message: "Signup failed", error: e.message });
   }
 });
 
-// Login Route
+
 authRouter.post('/login', async (req, res) => {
   try {
     const { phoneNumber, password } = req.body;
+
+    if (!phoneNumber || !password) {
+      return res.status(400).json({ message: "Phone number and password are required" });
+    }
 
     const user = await User.findOne({ phoneNumber });
     if (!user) {
@@ -53,32 +65,38 @@ authRouter.post('/login', async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    res.status(200).json({ message: "Login successful", token, user });
+    res.status(200).json({
+      message: "Login successful",
+      token,
+      user: { id: user._id, phoneNumber: user.phoneNumber, role: user.role }
+    });
 
   } catch (e) {
+    console.error("Login error:", e);
     res.status(500).json({ message: "Login failed", error: e.message });
   }
 });
 
-// Get All Users (Protected)
+
 authRouter.get('/users', authenticateToken, async (req, res) => {
   try {
     const users = await User.find().select('-password');
     res.status(200).json(users);
   } catch (e) {
+    console.error("Fetch users error:", e);
     res.status(500).json({ message: "Failed to fetch users", error: e.message });
   }
 });
 
-// Update User (Protected)
+
 authRouter.put('/update/:id', authenticateToken, async (req, res) => {
   try {
     const { phoneNumber, password, role } = req.body;
-    const updates = { phoneNumber, role };
+    const updates = {};
 
-    if (password) {
-      updates.password = await bcrypt.hash(password, 10);
-    }
+    if (phoneNumber) updates.phoneNumber = phoneNumber;
+    if (role) updates.role = role;
+    if (password) updates.password = await bcrypt.hash(password, 10);
 
     const updatedUser = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
 
@@ -89,11 +107,12 @@ authRouter.put('/update/:id', authenticateToken, async (req, res) => {
     res.status(200).json({ message: "User updated successfully", updatedUser });
 
   } catch (e) {
+    console.error("Update user error:", e);
     res.status(500).json({ message: "Update failed", error: e.message });
   }
 });
 
-// Delete User (Protected)
+
 authRouter.delete('/delete/:id', authenticateToken, async (req, res) => {
   try {
     const deletedUser = await User.findByIdAndDelete(req.params.id);
@@ -105,6 +124,7 @@ authRouter.delete('/delete/:id', authenticateToken, async (req, res) => {
     res.status(200).json({ message: "User deleted successfully", deletedUser });
 
   } catch (e) {
+    console.error("Delete user error:", e);
     res.status(500).json({ message: "Delete failed", error: e.message });
   }
 });

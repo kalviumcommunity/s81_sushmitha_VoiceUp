@@ -2,12 +2,11 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const User = require('../models/UserSchema');
-const Advocacy = require('../models/AdvocacySchema'); // ✅ important import
+const Advocacy = require('../models/AdvocacySchema'); 
 const authenticateToken = require('../db/middleware/authmiddleware');
 
 const router = express.Router();
 
-// GET all advocacy issues
 router.get('/all', async (req, res) => {
   try {
     const advocacies = await Advocacy.find().populate('createdBy', 'fullName email');
@@ -18,7 +17,7 @@ router.get('/all', async (req, res) => {
   }
 });
 
-// CREATE new advocacy
+
 router.post('/create', authenticateToken, async (req, res) => {
   const { title, description, dueDate, causeCategory } = req.body;
 
@@ -43,7 +42,7 @@ router.post('/create', authenticateToken, async (req, res) => {
   }
 });
 
-// UPDATE advocacy
+
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { title, description, dueDate, causeCategory, status } = req.body;
 
@@ -65,7 +64,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE advocacy
+
 router.delete('/delete/:id', authenticateToken, async (req, res) => {
   try {
     const deleted = await Advocacy.findByIdAndDelete(req.params.id);
@@ -80,5 +79,6 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Delete failed", error: e.message });
   }
 });
+
 
 module.exports = router;
