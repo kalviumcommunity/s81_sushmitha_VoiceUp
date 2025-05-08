@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const User = require('../models/UserSchema');
-const authenticateToken = require('../db/middleware/authwiddleWare');
+const authenticateToken = require('../df/middleware/authwiddleWare');
 // GET all advocacy issues
 router.get('/all', async (req, res) => {
   try {
