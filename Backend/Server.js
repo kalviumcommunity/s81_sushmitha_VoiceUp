@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 require("dotenv").config();
 
 
-const db = require("./df/db");
+const db = require("./db/middleware/db");
 const advocacy = require("./routes/advocacy");
 const auth = require("./routes/auth");
 const authenticateToken = require('../middleware/authmiddleware');
