@@ -1,65 +1,80 @@
 const express = require('express');
-const mongoose = require('mongoose');
-
-const router = express.Router();
-
-// Middleware to parse JSON
-router.use(express.json());
-
-// Get all advocacies
-router.get('/advocacies', async (req, res) => {
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const User = require('../models/UserSchema');
+const authenticateToken = require('../middleware/authwiddleWare');
+// GET all advocacy issues
+router.get('/all', async (req, res) => {
   try {
-    const advocacies = await Advocacy.find().populate('createdBy', 'username');
-    res.json(advocacies);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    const advocacies = await Advocacy.find().populate('createdBy', 'fullName email');
+    res.status(200).json(advocacies);
+  } catch (e) {
+    console.error('Error fetching advocacies:', e);
+    res.status(500).json({ message: "Failed to fetch advocacies", error: e.message });
   }
 });
-// Create a new advocacy
-router.post('/advocacies', async (req, res) => {
-    const { title, description, createdBy } = req.body;
-  
+
+// CREATE new advocacy
+router.post('/create', authenticateToken, async (req, res) => {
+  const { title, description, dueDate, causeCategory } = req.body;
+
+  if (!title || !description || !dueDate || !causeCategory) {
+    return res.status(400).json({ message: "All fields are required" });
+  }
+
+  try {
     const newAdvocacy = new Advocacy({
       title,
       description,
-      createdBy,
+      dueDate,
+      causeCategory,
+      createdBy: req.user.id
     });
-  
-    try {
-      const savedAdvocacy = await newAdvocacy.save();
-      res.status(201).json(savedAdvocacy);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
-  });
-  
-  // Update an existing advocacy
-  router.put('/advocacies/:id', async (req, res) => {
-    const { title, description } = req.body;
-    const { id } = req.params;
-  
-    // Validate MongoDB ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: 'Invalid ID format' });
-    }
-  
-    try {
-      const updatedAdvocacy = await Advocacy.findByIdAndUpdate(
-        id,
-        { title, description, updatedAt: new Date() },
-        { new: true }
-      );
-  
-      if (!updatedAdvocacy) {
-        return res.status(404).json({ message: 'Advocacy not found' });
-      }
-  
-      res.json(updatedAdvocacy);
-    } catch (err) {
-      res.status(400).json({ message: err.message });
-    }
-  });
 
+    const savedAdvocacy = await newAdvocacy.save();
+    res.status(201).json({ message: "Advocacy created successfully", savedAdvocacy });
+  } catch (e) {
+    console.error('Error creating advocacy:', e);
+    res.status(500).json({ message: "Failed to create advocacy", error: e.message });
+  }
+});
 
+// UPDATE advocacy
+router.put('/update/:id', authenticateToken, async (req, res) => {
+  const { title, description, dueDate, causeCategory, status } = req.body;
+
+  try {
+    const updated = await Advocacy.findByIdAndUpdate(
+      req.params.id,
+      { title, description, dueDate, causeCategory, status },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Advocacy not found" });
+    }
+
+    res.status(200).json({ message: "Advocacy updated successfully", updated });
+  } catch (e) {
+    console.error('Error updating advocacy:', e);
+    res.status(500).json({ message: "Update failed", error: e.message });
+  }
+});
+
+// DELETE advocacy
+router.delete('/delete/:id', authenticateToken, async (req, res) => {
+  try {
+    const deleted = await Advocacy.findByIdAndDelete(req.params.id);
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Advocacy not found" });
+    }
+
+    res.status(200).json({ message: "Advocacy deleted successfully", deleted });
+  } catch (e) {
+    console.error('Error deleting advocacy:', e);
+    res.status(500).json({ message: "Delete failed", error: e.message });
+  }
+});
 
 module.exports = router;

@@ -1,33 +1,32 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const {Route} = require('./routes/auth');
-const advocacyRoutes = require('./routes/advocacy');
+const express = require("express");
+const cors = require("cors");
+const mongoose = require("mongoose"); 
+require("dotenv").config();
 
 
-dotenv.config();
+const db = require("./db/db");
+const advocacy = require("./routes/advocacy");
+const auth = require("./routes/auth");
+const authenticateToken = require('../middleware/authmiddleware');
 
 const app = express();
+const port = process.env.PORT || 2471;  
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json());  // To parse incoming JSON requests
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+db();
 
-// Routes
-app.get('/', (req, res) => {
-  res.send('API is running...');
+// ROUTES
+app.use("/auth", authRouter);  
+app.use("/api/advocacy", authenticateToken, advocacy);  
+
+// Root Route (optional)
+app.get("/", (req, res) => {
+  res.send("🚀 VoiceUp API is live! Amplifying voices for change.");
 });
 
-app.use('/auth', Route);
-app.use('/advo', advocacyRoutes);
-
-
-// Start Server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+// START SERVER
+app.listen(port, () => {
+  console.log(`🎤 VoiceUp Server is up and running on http://localhost:${port}`);
 });
