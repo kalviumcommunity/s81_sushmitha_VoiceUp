@@ -2,7 +2,11 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const User = require('../models/UserSchema');
-const authenticateToken = require('../df/middleware/authwiddleWare');
+const Advocacy = require('../models/AdvocacySchema'); // ✅ important import
+const authenticateToken = require('../db/middleware/authmiddleware');
+
+const router = express.Router();
+
 // GET all advocacy issues
 router.get('/all', async (req, res) => {
   try {
