@@ -7,7 +7,7 @@ VoiceUp is a doer website that exhorts activist user action to do more than sign
 
 It is also intended to track quantifiable change and foster direct communications with policy makers. Technologically, VoiceUp employs the latest solutions for easy growth, including cloud-based infrastructure on AWS/Google Cloud for auto-scaling, secure and scalable database on MongoDB/Firebase, modular microservices for enhanced performance, AI-powered personalization, multilingual and global growth, and enhanced web and mobile experience. Additionally, VoiceUp is pushing forward with some of its most important initiatives on technology and partnerships, such as working with NGOs and government in scaling reach and impact, incorporating blockchain technology into secure and traceable petition streams, and creating APIs for third-party integrations for utility enhancement. The idea of the capstone then enables the idea of inner strength as a means of empowering people and the assertion that collaborative action has the power to bring about great change and profound alteration.
 
-***DAILY PLANS:- ***
+**DAILY PLANS:- **
 
 Day 1: Create a low-fidelity design for VoiceUp.
 
