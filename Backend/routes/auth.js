@@ -7,6 +7,9 @@ const authenticateToken = require('../db/middleware/authmiddleware');
 const authRouter = express.Router();
 
 
+authRouter.use(express.json());
+authRouter.use(express.urlencoded({ extended: true }));
+
 const generateToken = (userId) => {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET not set in environment variables.");
@@ -14,29 +17,53 @@ const generateToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '10d' });
 };
 
-
+// Signup
 authRouter.post('/signup', async (req, res) => {
   try {
-    const { phoneNumber, password, role } = req.body;
+    const { phoneNumber, password, role, fullName, email, location } = req.body;
 
-    if (!phoneNumber || !password || !role) {
-      return res.status(400).json({ message: "All fields are required" });
+    if (!phoneNumber || !password || !role || !fullName) {
+      return res.status(400).json({ message: "Required fields are missing" });
     }
 
-    const userExists = await User.findOne({ phoneNumber });
-    if (userExists) {
-      return res.status(400).json({ message: "User already exists" });
+    const existingUser = await User.findOne({ phoneNumber });
+    if (existingUser) {
+      return res.status(400).json({ message: "User with this phone number already exists" });
+    }
+
+    if (email) {
+      const emailExists = await User.findOne({ email });
+      if (emailExists) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({ phoneNumber, password: hashedPassword, role });
+    const newUser = new User({
+      phoneNumber,
+      password: hashedPassword,
+      role,
+      fullName,
+      email,
+      location
+    });
+
     await newUser.save();
 
     const token = generateToken(newUser._id);
     res.status(201).json({
       message: "Signup successful",
       token,
-      user: { id: newUser._id, phoneNumber: newUser.phoneNumber, role: newUser.role }
+      user: {
+        id: newUser._id,
+        phoneNumber: newUser.phoneNumber,
+        role: newUser.role,
+        fullName: newUser.fullName,
+        email: newUser.email,
+        location: newUser.location,
+        impactPoints: newUser.impactPoints,
+        isVerified: newUser.isVerified
+      }
     });
 
   } catch (e) {
@@ -45,7 +72,7 @@ authRouter.post('/signup', async (req, res) => {
   }
 });
 
-
+// Login
 authRouter.post('/login', async (req, res) => {
   try {
     const { phoneNumber, password } = req.body;
@@ -68,7 +95,16 @@ authRouter.post('/login', async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token,
-      user: { id: user._id, phoneNumber: user.phoneNumber, role: user.role }
+      user: {
+        id: user._id,
+        phoneNumber: user.phoneNumber,
+        role: user.role,
+        fullName: user.fullName,
+        email: user.email,
+        location: user.location,
+        impactPoints: user.impactPoints,
+        isVerified: user.isVerified
+      }
     });
 
   } catch (e) {
@@ -77,7 +113,7 @@ authRouter.post('/login', async (req, res) => {
   }
 });
 
-
+// Get all users
 authRouter.get('/users', authenticateToken, async (req, res) => {
   try {
     const users = await User.find().select('-password');
@@ -88,17 +124,26 @@ authRouter.get('/users', authenticateToken, async (req, res) => {
   }
 });
 
-
+// Update user
 authRouter.put('/update/:id', authenticateToken, async (req, res) => {
   try {
-    const { phoneNumber, password, role } = req.body;
+    const {
+      phoneNumber, password, role, fullName, email,
+      location, impactPoints, isVerified
+    } = req.body;
+
     const updates = {};
 
     if (phoneNumber) updates.phoneNumber = phoneNumber;
     if (role) updates.role = role;
+    if (fullName) updates.fullName = fullName;
+    if (email) updates.email = email;
+    if (location) updates.location = location;
+    if (impactPoints !== undefined) updates.impactPoints = impactPoints;
+    if (isVerified !== undefined) updates.isVerified = isVerified;
     if (password) updates.password = await bcrypt.hash(password, 10);
 
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, updates, { new: true }).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
@@ -112,7 +157,7 @@ authRouter.put('/update/:id', authenticateToken, async (req, res) => {
   }
 });
 
-
+// Delete user
 authRouter.delete('/delete/:id', authenticateToken, async (req, res) => {
   try {
     const deletedUser = await User.findByIdAndDelete(req.params.id);

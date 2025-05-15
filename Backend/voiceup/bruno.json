@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "voiceup",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

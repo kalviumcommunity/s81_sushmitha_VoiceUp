@@ -8,7 +8,7 @@ const AdvocacySchema = new mongoose.Schema({
   description: String,
   causeCategory: {
     type: String,
-    enum: ['climate', 'education', 'health', 'equality', 'governance', 'other'],
+    enum: ['climate', 'education','health', 'equality', 'governance', 'other'],
     default: 'other'
   },
   dueDate: Date,
@@ -21,6 +21,7 @@ const AdvocacySchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
+  
 });
 
 module.exports = mongoose.model('Advocacy', AdvocacySchema);
