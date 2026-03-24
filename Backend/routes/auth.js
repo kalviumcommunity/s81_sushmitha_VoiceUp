@@ -1,177 +1,581 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const bcrypt = require("bcrypt");
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const User = require('../models/UserSchema');
 const authenticateToken = require('../db/middleware/authmiddleware');
+const { requireRole } = require('../db/middleware/roleMiddleware');
+const { authLimiter, passwordResetLimiter } = require('../db/middleware/rateLimitMiddleware');
 
-const authRouter = express.Router();
+const router = express.Router();
 
-
-authRouter.use(express.json());
-authRouter.use(express.urlencoded({ extended: true }));
-
-const generateToken = (userId) => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET not set in environment variables.");
-  }
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '10d' });
+// Helper function to generate tokens
+const generateTokens = (userId) => {
+  const accessToken = jwt.sign(
+    { userId },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+  
+  const refreshToken = jwt.sign(
+    { userId, type: 'refresh' },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: '7d' }
+  );
+  
+  return { accessToken, refreshToken };
 };
 
-// Signup
-authRouter.post('/signup', async (req, res) => {
+// Helper function to award points
+const awardPoints = async (userId, points, reason) => {
   try {
-    const { phoneNumber, password, role, fullName, email, location } = req.body;
+    await User.findByIdAndUpdate(
+      userId,
+      { $inc: { impactPoints: points } },
+      { new: true }
+    );
+  } catch (error) {
+    console.error('Error awarding points:', error);
+  }
+};
 
-    if (!phoneNumber || !password || !role || !fullName) {
-      return res.status(400).json({ message: "Required fields are missing" });
+// Register endpoint
+router.post('/register', authLimiter, async (req, res) => {
+  try {
+    const { phoneNumber, password, fullName, email, location, role = 'User' } = req.body;
+
+    // Validation
+    if (!phoneNumber || !password || !fullName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number, password, and full name are required'
+      });
     }
 
-    const existingUser = await User.findOne({ phoneNumber });
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { phoneNumber },
+        ...(email ? [{ email }] : [])
+      ]
+    });
+
     if (existingUser) {
-      return res.status(400).json({ message: "User with this phone number already exists" });
+      return res.status(409).json({
+        success: false,
+        message: 'User with this phone number or email already exists'
+      });
     }
 
-    if (email) {
-      const emailExists = await User.findOne({ email });
-      if (emailExists) {
-        return res.status(400).json({ message: "Email already in use" });
-      }
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({
+    // Create new user
+    const user = new User({
       phoneNumber,
-      password: hashedPassword,
-      role,
+      password,
       fullName,
       email,
-      location
+      location,
+      role,
+      verificationToken: crypto.randomBytes(32).toString('hex')
     });
 
-    await newUser.save();
+    await user.save();
 
-    const token = generateToken(newUser._id);
+    // Generate tokens
+    const { accessToken, refreshToken } = generateTokens(user._id);
+
+    // Store refresh token
+    user.refreshTokens.push({
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    });
+    await user.save();
+
+    // Award registration points
+    await awardPoints(user._id, 100, 'REGISTRATION');
+
+    // Add first achievement
+    user.addAchievement('FIRST_CAMPAIGN', 'Welcome to VoiceUp! Ready to make an impact.');
+    await user.save();
+
     res.status(201).json({
-      message: "Signup successful",
-      token,
-      user: {
-        id: newUser._id,
-        phoneNumber: newUser.phoneNumber,
-        role: newUser.role,
-        fullName: newUser.fullName,
-        email: newUser.email,
-        location: newUser.location,
-        impactPoints: newUser.impactPoints,
-        isVerified: newUser.isVerified
+      success: true,
+      message: 'User registered successfully',
+      data: {
+        user: {
+          id: user._id,
+          phoneNumber: user.phoneNumber,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          impactPoints: user.impactPoints,
+          isVerified: user.isVerified
+        },
+        accessToken,
+        refreshToken
       }
     });
 
-  } catch (e) {
-    console.error("Signup error:", e);
-    res.status(500).json({ message: "Signup failed", error: e.message });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during registration'
+    });
   }
 });
 
-// Login
-authRouter.post('/login', async (req, res) => {
+// Login endpoint
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { phoneNumber, password } = req.body;
 
     if (!phoneNumber || !password) {
-      return res.status(400).json({ message: "Phone number and password are required" });
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number and password are required'
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({ phoneNumber });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+      return res.status(423).json({
+        success: false,
+        message: 'Account is temporarily locked due to too many failed login attempts'
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await user.comparePassword(password);
+    if (!isValidPassword) {
+      await user.incLoginAttempts();
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Reset login attempts on successful login
+    if (user.loginAttempts > 0) {
+      await user.resetLoginAttempts();
+    }
+
+    // Update last active
+    user.lastActive = new Date();
+    await user.save();
+
+    // Generate tokens
+    const { accessToken, refreshToken } = generateTokens(user._id);
+
+    // Store refresh token
+    user.refreshTokens.push({
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    });
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: user._id,
+          phoneNumber: user.phoneNumber,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          impactPoints: user.impactPoints,
+          isVerified: user.isVerified,
+          achievements: user.achievements
+        },
+        accessToken,
+        refreshToken
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during login'
+    });
+  }
+});
+
+// Refresh token endpoint
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token is required'
+      });
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    
+    if (decoded.type !== 'refresh') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token type'
+      });
+    }
+
+    // Find user and check if refresh token exists
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const tokenExists = user.refreshTokens.some(
+      tokenObj => tokenObj.token === refreshToken && tokenObj.expiresAt > new Date()
+    );
+
+    if (!tokenExists) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired refresh token'
+      });
+    }
+
+    // Generate new tokens
+    const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id);
+
+    // Remove old refresh token and add new one
+    user.refreshTokens = user.refreshTokens.filter(
+      tokenObj => tokenObj.token !== refreshToken
+    );
+    user.refreshTokens.push({
+      token: newRefreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    });
+    await user.save();
+
+    res.json({
+      success: true,
+      data: {
+        accessToken,
+        refreshToken: newRefreshToken
+      }
+    });
+
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({
+      success: false,
+      message: 'Invalid refresh token'
+    });
+  }
+});
+
+// Logout endpoint
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    const user = await User.findById(req.user.userId);
+
+    if (refreshToken && user) {
+      // Remove specific refresh token
+      user.refreshTokens = user.refreshTokens.filter(
+        tokenObj => tokenObj.token !== refreshToken
+      );
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout'
+    });
+  }
+});
+
+// Logout from all devices
+router.post('/logout-all', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (user) {
+      user.refreshTokens = [];
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out from all devices successfully'
+    });
+
+  } catch (error) {
+    console.error('Logout all error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout'
+    });
+  }
+});
+
+// Get current user profile
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password -refreshTokens -verificationToken -resetPasswordToken');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { user }
+    });
+
+  } catch (error) {
+    console.error('Profile fetch error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profile'
+    });
+  }
+});
+
+// Update user profile
+router.put('/profile', authenticateToken, async (req, res) => {
+  try {
+    const allowedUpdates = ['fullName', 'email', 'location', 'profile', 'preferences'];
+    const updates = {};
+
+    // Filter allowed updates
+    Object.keys(req.body).forEach(key => {
+      if (allowedUpdates.includes(key)) {
+        updates[key] = req.body[key];
+      }
+    });
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      updates,
+      { new: true, runValidators: true }
+    ).select('-password -refreshTokens -verificationToken -resetPasswordToken');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: { user }
+    });
+
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating profile'
+    });
+  }
+});
+
+// Request password reset
+router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
+  try {
+    const { phoneNumber } = req.body;
+
+    if (!phoneNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number is required'
+      });
     }
 
     const user = await User.findOne({ phoneNumber });
     if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      // Don't reveal if user exists or not
+      return res.json({
+        success: true,
+        message: 'If a user with this phone number exists, a reset code will be sent'
+      });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
 
-    const token = generateToken(user._id);
-    res.status(200).json({
-      message: "Login successful",
-      token,
-      user: {
-        id: user._id,
-        phoneNumber: user.phoneNumber,
-        role: user.role,
-        fullName: user.fullName,
-        email: user.email,
-        location: user.location,
-        impactPoints: user.impactPoints,
-        isVerified: user.isVerified
-      }
+    // TODO: Send SMS with reset code
+    console.log(`Password reset token for ${phoneNumber}: ${resetToken}`);
+
+    res.json({
+      success: true,
+      message: 'If a user with this phone number exists, a reset code will be sent'
     });
 
-  } catch (e) {
-    console.error("Login error:", e);
-    res.status(500).json({ message: "Login failed", error: e.message });
+  } catch (error) {
+    console.error('Password reset request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing password reset request'
+    });
   }
 });
 
-// Get all users
-authRouter.get('/users', authenticateToken, async (req, res) => {
+// Reset password
+router.post('/reset-password', passwordResetLimiter, async (req, res) => {
   try {
-    const users = await User.find().select('-password');
-    res.status(200).json(users);
-  } catch (e) {
-    console.error("Fetch users error:", e);
-    res.status(500).json({ message: "Failed to fetch users", error: e.message });
-  }
-});
+    const { phoneNumber, resetToken, newPassword } = req.body;
 
-// Update user
-authRouter.put('/update/:id', authenticateToken, async (req, res) => {
-  try {
-    const {
-      phoneNumber, password, role, fullName, email,
-      location, impactPoints, isVerified
-    } = req.body;
-
-    const updates = {};
-
-    if (phoneNumber) updates.phoneNumber = phoneNumber;
-    if (role) updates.role = role;
-    if (fullName) updates.fullName = fullName;
-    if (email) updates.email = email;
-    if (location) updates.location = location;
-    if (impactPoints !== undefined) updates.impactPoints = impactPoints;
-    if (isVerified !== undefined) updates.isVerified = isVerified;
-    if (password) updates.password = await bcrypt.hash(password, 10);
-
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, updates, { new: true }).select('-password');
-
-    if (!updatedUser) {
-      return res.status(404).json({ message: "User not found" });
+    if (!phoneNumber || !resetToken || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number, reset token, and new password are required'
+      });
     }
 
-    res.status(200).json({ message: "User updated successfully", updatedUser });
+    const user = await User.findOne({
+      phoneNumber,
+      resetPasswordToken: resetToken,
+      resetPasswordExpires: { $gt: new Date() }
+    });
 
-  } catch (e) {
-    console.error("Update user error:", e);
-    res.status(500).json({ message: "Update failed", error: e.message });
-  }
-});
-
-// Delete user
-authRouter.delete('/delete/:id', authenticateToken, async (req, res) => {
-  try {
-    const deletedUser = await User.findByIdAndDelete(req.params.id);
-
-    if (!deletedUser) {
-      return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token'
+      });
     }
 
-    res.status(200).json({ message: "User deleted successfully", deletedUser });
+    // Update password
+    user.password = newPassword;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    user.refreshTokens = []; // Invalidate all refresh tokens
+    await user.save();
 
-  } catch (e) {
-    console.error("Delete user error:", e);
-    res.status(500).json({ message: "Delete failed", error: e.message });
+    res.json({
+      success: true,
+      message: 'Password reset successfully'
+    });
+
+  } catch (error) {
+    console.error('Password reset error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error resetting password'
+    });
   }
 });
 
-module.exports = authRouter;
+// Change password (authenticated)
+router.post('/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required'
+      });
+    }
+
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isValidPassword = await user.comparePassword(currentPassword);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.error('Password change error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error changing password'
+    });
+  }
+});
+
+// Admin endpoint to manage user roles
+router.put('/users/:userId/role', authenticateToken, requireRole(['Admin']), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (!['User', 'Advocate', 'Organizer', 'Admin'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role'
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { role },
+      { new: true }
+    ).select('-password -refreshTokens');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User role updated successfully',
+      data: { user }
+    });
+
+  } catch (error) {
+    console.error('Role update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating user role'
+    });
+  }
+});
+
+module.exports = router;
